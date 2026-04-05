@@ -3,6 +3,19 @@
 ##############################################################
 
 services:
+  # ================================================================
+  #  CLOUDFLARE TUNNEL
+  # ================================================================
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --config /etc/cloudflared/config.yml run
+    volumes:
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
+    restart: unless-stopped
+    extra_hosts: # ✅ Linux tự tạo alias này; Windows/Mac đã có sẵn
+      - "host.docker.internal:host-gateway"
+
   omniroute:
     image: diegosouzapw/omniroute:latest
     restart: unless-stopped

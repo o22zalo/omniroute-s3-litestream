@@ -1,5 +1,6 @@
 # Bỏ qua mọi file trong app/data/
 data/*
+*credentials.json
 
 # Nhưng giữ lại .gitkeep
 !data/.gitkeep
