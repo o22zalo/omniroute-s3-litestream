@@ -35,9 +35,54 @@ jobs:
         run: bash .github/scripts/detect-os.sh
 
       # ================================================================
-      #  STEP 3 — Setup môi trường theo OS
-      #  Linux : setup sshd cho webssh
-      #  Windows: setup WSL2 + Docker Linux engine + ttyd
+      #  STEP 2b — Inject INSTANCE_ID vào .env
+      #
+      #  INSTANCE_ID = {run_id}-{attempt}-{runner_name}
+      #  → Unique per GitHub Actions run + retry
+      #  → Elector dùng để phân biệt instances trong RTDB lock
+      # ================================================================
+      - name: Set INSTANCE_ID
+        shell: bash
+        run: |
+          INSTANCE_ID="${{ github.run_id }}-${{ github.run_attempt }}-${{ runner.name }}"
+          # Sanitize: chỉ giữ alphanumeric + dash
+          INSTANCE_ID=$(echo "$INSTANCE_ID" | tr -cs 'a-zA-Z0-9-' '-' | sed 's/-*$//')
+          echo "INSTANCE_ID=${INSTANCE_ID}" >> .env
+          echo "INSTANCE_ID=${INSTANCE_ID}" >> "$GITHUB_ENV"
+          echo "✅ INSTANCE_ID=$INSTANCE_ID"
+
+      # ================================================================
+      #  STEP 3 — Force leader lock takeover
+      #
+      #  Xóa RTDB lock trước khi deploy để instance mới có thể
+      #  giành leadership ngay lập tức thay vì chờ TTL expire (30s).
+      #
+      #  Safe: Elector của instance cũ sẽ detect lock mất và tự demote.
+      #  Atomic: Elector mới sẽ win election sau khi compose up xong.
+      # ================================================================
+      - name: Force leader lock takeover
+        shell: bash
+        run: |
+          PROJECT_NAME="$(basename "$GITHUB_WORKSPACE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          LOCK_KEY="leader-lock-${PROJECT_NAME}"
+          LOCK_URL="${RTDB_URL%%\?*}/${LOCK_KEY}.json"
+          LOCK_QUERY="${RTDB_URL#*\?}"
+          [ "$LOCK_QUERY" = "$RTDB_URL" ] && LOCK_QUERY=""
+
+          if [ -n "$LOCK_QUERY" ]; then
+            FULL_URL="${LOCK_URL}?${LOCK_QUERY}"
+          else
+            FULL_URL="${LOCK_URL}"
+          fi
+
+          echo "Clearing leader lock: $LOCK_KEY"
+          HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" \
+            -X DELETE "$FULL_URL" 2>/dev/null || echo "000")
+          echo "→ HTTP $HTTP_CODE"
+          echo "✅ Lock cleared — instance mới sẽ win election ngay sau deploy"
+
+      # ================================================================
+      #  STEP 4 — Setup môi trường theo OS
       # ================================================================
       - name: Setup environment (Linux)
         if: runner.os == 'Linux'
@@ -50,9 +95,8 @@ jobs:
         run: .github/scripts/setup-windows.ps1
 
       # ================================================================
-      #  STEP 4 — Build & start Docker Compose stack
-      #  Linux : docker compose trực tiếp
-      #  Windows: chạy bên trong WSL2
+      #  STEP 5 — Build & start Docker Compose stack
+      #  Elector sẽ tự start managed services sau khi win election
       # ================================================================
       - name: Build & start services (Linux)
         if: runner.os == 'Linux'
@@ -67,7 +111,39 @@ jobs:
           wsl -d Ubuntu -- bash -c "cd '$wsl' && sudo docker compose up -d --build --remove-orphans"
 
       # ================================================================
-      #  STEP 5 — Cleanup + keepalive
+      #  STEP 6 — Chờ elector trở thành leader
+      #
+      #  Poll RTDB để confirm instance này đã win election.
+      #  Timeout 120s = TTL(30s) + restore time + startup time.
+      # ================================================================
+      - name: Wait for elector to become leader
+        shell: bash
+        run: |
+          echo "Chờ elector của run này win election..."
+          EXPECTED_ID="${{ github.run_id }}-${{ github.run_attempt }}-${{ runner.name }}"
+          EXPECTED_ID=$(echo "$EXPECTED_ID" | tr -cs 'a-zA-Z0-9-' '-' | sed 's/-*$//')
+
+          PROJECT_NAME="$(basename "$GITHUB_WORKSPACE" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9-' '-')"
+          LOCK_KEY="leader-lock-${PROJECT_NAME}"
+          LOCK_URL="${RTDB_URL%%\?*}/${LOCK_KEY}.json"
+          LOCK_QUERY="${RTDB_URL#*\?}"
+          [ "$LOCK_QUERY" = "$RTDB_URL" ] && LOCK_QUERY=""
+          [ -n "$LOCK_QUERY" ] && FULL_URL="${LOCK_URL}?${LOCK_QUERY}" || FULL_URL="${LOCK_URL}"
+
+          for i in $(seq 1 24); do
+            CURRENT=$(curl -sf "$FULL_URL" 2>/dev/null | \
+              python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('instance_id',''))" \
+              2>/dev/null || echo "")
+            echo "  [${i}/24] current leader: ${CURRENT:-<none>}"
+            if [ "$CURRENT" = "$EXPECTED_ID" ]; then
+              echo "✅ Instance này đã là LEADER!"
+              break
+            fi
+            sleep 5
+          done
+
+      # ================================================================
+      #  STEP 7 — Cleanup + keepalive
       # ================================================================
       - name: Clean up unused images (Linux)
         if: runner.os == 'Linux'
@@ -86,7 +162,7 @@ jobs:
         run: dotenvrtdb runner keepalive
 
       # ================================================================
-      #  STEP 6 — Collect artifacts (always)
+      #  STEP 8 — Collect artifacts (always)
       # ================================================================
       - name: Collect docker runtime artifacts (Linux)
         if: always() && runner.os == 'Linux'

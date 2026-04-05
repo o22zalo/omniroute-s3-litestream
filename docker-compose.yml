@@ -1,42 +1,123 @@
 ##############################################################
-# docker-compose.yml — Production (Cloudflare Proxy)
+# docker-compose.yml — Multi-Instance với Leader Election
+#
+# Architecture:
+#   elector     — luôn chạy, điều phối qua RTDB distributed lock
+#   litestream  — chỉ chạy trên LEADER (elector kiểm soát)
+#   omniroute   — chỉ chạy trên LEADER (elector kiểm soát)
+#   cloudflared — chỉ chạy trên LEADER (elector kiểm soát)
+#
+# Follower: tất cả managed services STOPPED
+#   → Cloudflare Tunnel tự động skip instance không healthy
+#   → Zero-downtime failover khi leader chết
+#
+# QUAN TRỌNG: restart: "no" cho managed services
+#   → Elector là người duy nhất quyết định start/stop
+#   → Tránh race condition với Docker restart policy
 ##############################################################
 
 services:
+
   # ================================================================
-  #  CLOUDFLARE TUNNEL
+  #  ELECTOR — Leader election daemon
+  #  Luôn chạy, không phụ thuộc service nào
+  # ================================================================
+  elector:
+    build:
+      context: ./services/elector
+      dockerfile: Dockerfile
+    container_name: ${COMPOSE_PROJECT_NAME:-msi}-elector
+    restart: unless-stopped   # elector TỰ restart nếu crash
+    volumes:
+      # Cần Docker socket để start/stop các container khác
+      - /var/run/docker.sock:/var/run/docker.sock
+    env_file: .env
+    environment:
+      # COMPOSE_PROJECT_NAME phải khớp với project name để tìm đúng container
+      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-omniroute-s3-litestream}
+      # RTDB key cho distributed lock — unique per deployment target
+      - LEADER_LOCK_KEY=leader-lock-${COMPOSE_PROJECT_NAME:-omniroute-s3-litestream}
+      # Thời gian lock tồn tại (giây) — failover time = TTL + restore time
+      - LEADER_LOCK_TTL=30
+      # Heartbeat interval (giây) — phải < TTL/2 để tránh flapping
+      - HEARTBEAT_INTERVAL=10
+      # Instance ID — inject từ CI để dễ debug
+      # GitHub Actions: GITHUB_RUN_ID-GITHUB_RUN_ATTEMPT-RUNNER_NAME
+      - INSTANCE_ID=${INSTANCE_ID:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ================================================================
+  #  CLOUDFLARE TUNNEL — Managed by elector
+  #
+  #  restart: "no" → Docker KHÔNG tự restart
+  #  Chỉ elector mới được start/stop container này
+  #
+  #  Khi container STOPPED:
+  #    cloudflared không kết nối với Cloudflare
+  #    → Cloudflare tự route traffic sang instance có cloudflared running
+  #    → Đây là cơ chế failover tự động
   # ================================================================
   cloudflared:
     image: cloudflare/cloudflared:latest
+    container_name: ${COMPOSE_PROJECT_NAME:-msi}-cloudflared
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
       - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
       - ./cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
-    restart: unless-stopped
-    extra_hosts: # ✅ Linux tự tạo alias này; Windows/Mac đã có sẵn
+    restart: "no"   # ← elector controls this
+    extra_hosts:
       - "host.docker.internal:host-gateway"
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+  # ================================================================
+  #  OMNIROUTE — Managed by elector
+  #  Chỉ start sau khi litestream đã healthy (restore xong)
+  # ================================================================
   omniroute:
     image: diegosouzapw/omniroute:latest
-    restart: unless-stopped
+    container_name: ${COMPOSE_PROJECT_NAME:-msi}-omniroute
+    restart: "no"   # ← elector controls this
     stop_grace_period: 40s
     env_file: .env
     environment:
       - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
-      # ✅ Dấu / ở đầu BẮT BUỘC — thiếu / thì app ghi vào /app/app/data/ thay vì /app/data/
       - DATA_DIR=/app/data
       - OMNIROUTE_DISABLE_AUTO_BACKUP=true
     ports:
       - "${OMNIROUTE_PORT:-20128}:${OMNIROUTE_PORT:-20128}"
     volumes:
       - ./data:/app/data
-    depends_on:
-      litestream:
-        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
+  # ================================================================
+  #  LITESTREAM — Managed by elector
+  #
+  #  CRITICAL: Chỉ 1 instance litestream được replicate tại 1 lúc
+  #  → elector đảm bảo điều này qua leader election
+  #
+  #  startup.sh flow:
+  #    1. Check S3 có snapshot không
+  #    2. Nếu có → restore (fail hard nếu error, không start với DB rỗng)
+  #    3. exec litestream replicate
+  # ================================================================
   litestream:
     image: litestream/litestream:latest
-    restart: unless-stopped
+    container_name: ${COMPOSE_PROJECT_NAME:-msi}-litestream
+    restart: "no"   # ← elector controls this
     env_file: .env
     volumes:
       - ./data:/app/data
@@ -44,8 +125,16 @@ services:
       - ./litestream/startup.sh:/startup.sh:ro
     entrypoint: ["/bin/sh", "/startup.sh"]
     healthcheck:
-      test: ["CMD", "litestream", "databases", "-config", "/etc/litestream.yml"]
+      # Healthy khi litestream replicate đang chạy và DB được track
+      test:
+        - "CMD-SHELL"
+        - "litestream databases -config /etc/litestream.yml 2>/dev/null | grep -q storage.sqlite"
       interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 12         # 12 × 10s = 120s grace
+      start_period: 120s  # Cho phép restore lớn (tăng nếu DB > 500MB)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

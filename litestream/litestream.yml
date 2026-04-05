@@ -11,6 +11,8 @@ dbs:
         force-path-style: true
         sign-payload: true
         region: ap-southeast-1
+        path: storage
+
         # Sync interval (default 1s) — tăng lên để giảm request count nếu cần
         # sync-interval: 10s
         # Retention: giữ snapshot bao lâu (default: không xóa)
