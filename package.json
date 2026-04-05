@@ -4,6 +4,7 @@
   "main": "index.js",
   "scripts": {
     "docker-compose-up": "docker compose up -d",
+    "rtdb-push-env": "dotenvrtdb -e .env --push -eUrl=$env:RTDB_URL",
     "git-o": "powershell -NoProfile -Command \"Start-Process -FilePath cmd.exe -WorkingDirectory '%CD%' -ArgumentList '/k', 'git o'\"",
     "git-oexecute": "powershell -NoProfile -Command \"Start-Process -FilePath cmd.exe -WorkingDirectory '%CD%' -ArgumentList '/k', 'git oexecute'\"",
     "git-oaddcommit": "powershell -NoProfile -Command \"Start-Process -FilePath cmd.exe -WorkingDirectory '%CD%' -ArgumentList '/k', 'git oaddcommit'\"",
