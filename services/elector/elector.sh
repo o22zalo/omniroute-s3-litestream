@@ -20,12 +20,17 @@ set -uo pipefail
 RTDB_URL="${RTDB_URL:?RTDB_URL is required}"
 
 # Tách base URL và query params (auth token nếu có)
-# Ví dụ: https://proj.firebaseio.com?auth=TOKEN
-#   → RTDB_BASE = https://proj.firebaseio.com
-#   → RTDB_QUERY = auth=TOKEN
+# Hỗ trợ cả 2 dạng:
+#   1) https://xxx.firebasedatabase.app?auth=TOKEN
+#   2) https://xxx.firebasedatabase.app/env-prod.json?auth=TOKEN
+# Sau normalize:
+#   - bỏ trailing slash
+#   - bỏ ".json" nếu URL đầu vào đã có sẵn
 RTDB_BASE="${RTDB_URL%%\?*}"
 RTDB_QUERY="${RTDB_URL#*\?}"
 [ "$RTDB_QUERY" = "$RTDB_URL" ] && RTDB_QUERY=""
+RTDB_BASE="${RTDB_BASE%/}"
+RTDB_BASE="${RTDB_BASE%.json}"
 
 # Unique instance ID — tạo 1 lần per container lifecycle
 _ID_FILE="/tmp/elector-instance-id"
@@ -61,6 +66,12 @@ FOLLOWER_STOP_ORDER="cloudflared omniroute litestream"
 log()  { echo "[elector $(date '+%H:%M:%S')] $*"; }
 info() { log "ℹ  $*"; }
 warn() { log "⚠  $*" >&2; }
+
+# Cảnh báo khi CI inject placeholder literal thay vì giá trị thực
+[ "${COMPOSE_PROJECT_NAME:-}" = "COMPOSE_PROJECT_NAME" ] \
+  && warn "COMPOSE_PROJECT_NAME đang là placeholder literal"
+[ "${INSTANCE_ID:-}" = "INSTANCE_ID" ] \
+  && warn "INSTANCE_ID đang là placeholder literal"
 
 # ──────────────────────────────────────────────────────────────────────
 # 3. Docker helpers
