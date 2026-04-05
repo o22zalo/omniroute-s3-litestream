@@ -1,12 +1,10 @@
 FROM alpine:3.19
 
-# bash     — scripting
-# curl     — RTDB REST API calls
-# jq       — JSON parsing
+# nodejs   — elector daemon (JavaScript)
 # docker-cli — container control qua socket
-RUN apk add --no-cache bash curl jq docker-cli
+RUN apk add --no-cache nodejs docker-cli
 
-COPY elector.sh /elector.sh
-RUN chmod +x /elector.sh
+COPY elector.js /elector.js
+RUN chmod +x /elector.js
 
-ENTRYPOINT ["/elector.sh"]
+ENTRYPOINT ["/elector.js"]
