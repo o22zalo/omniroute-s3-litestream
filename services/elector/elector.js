@@ -38,8 +38,12 @@ const _rawInstance = (process.env.INSTANCE_ID || "").trim();
 const INSTANCE_ID = _rawInstance && _rawInstance !== "INSTANCE_ID" ? _rawInstance : crypto.randomBytes(8).toString("hex");
 
 const LOCK_NODE = `leader-lock-${COMPOSE_PROJECT}/instances`;
-const LEADER_SVCS = ["litestream", "omniroute", "cloudflared"];
-const FOLLOWER_STOP = ["cloudflared", "omniroute", "litestream"];
+const LEADER_CORE_SVCS = ["litestream", "omniroute", "cloudflared"];
+const FOLLOWER_STOP_FALLBACK = ["cloudflared", "omniroute", "litestream", "dozzle", "filebrowser"];
+const KEEP_SERVICES = (process.env.ELECTOR_KEEP_SERVICES || "elector")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 // Compose file & env — mounted vào elector container từ host workspace
 const COMPOSE_FILE = "/workspace/docker-compose.yml";
@@ -199,6 +203,21 @@ function composeUp(service) {
   return r.ok;
 }
 
+function listComposeServices() {
+  const r = composeExec(["config", "--services"], { silent: true, timeout: 30000 });
+  if (!r.ok || !r.stdout) return [];
+  return r.stdout
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function followerStopServices() {
+  const fromCompose = listComposeServices().filter((svc) => !KEEP_SERVICES.includes(svc));
+  if (fromCompose.length) return fromCompose;
+  return FOLLOWER_STOP_FALLBACK.filter((svc) => !KEEP_SERVICES.includes(svc));
+}
+
 // ── State inspection helpers ──────────────────────────────────────────
 function getContainerName(service) {
   const r = dockerExec(
@@ -328,7 +347,7 @@ async function onBecomeLeader(instances) {
     await pruneAllExceptSelf(instances);
 
     log("🧹 compose down managed services (clean start)...");
-    composeDown(LEADER_SVCS);
+    composeDown(LEADER_CORE_SVCS);
 
     composeUp("litestream");
 
@@ -339,7 +358,6 @@ async function onBecomeLeader(instances) {
 
     composeUp("omniroute");
     composeUp("cloudflared");
-
     log("══════════════════════════════════════════════");
     log("✅ LEADER mode fully active");
     log("══════════════════════════════════════════════");
@@ -359,7 +377,7 @@ async function onFollowerRetire(reason = "") {
     log(`📡 FOLLOWER RETIRE — ${INSTANCE_ID}${reason ? ` (${reason})` : ""}`);
     log("══════════════════════════════════════════════");
 
-    composeDown(FOLLOWER_STOP);
+    composeDown(followerStopServices());
 
     await rtdbDelete(`${LOCK_NODE}/${INSTANCE_ID}`).catch((e) => warn("delete self:", e.message));
     log("🧼 Retired: containers removed + RTDB entry deleted");
@@ -383,7 +401,7 @@ async function onFollowerRetire(reason = "") {
 function leaderHealthCheck() {
   // FIX 3: thêm || _transitioning để tránh race ngay sau onBecomeLeader
   if (!IS_LEADER || IS_RETIRED || _transitioning) return;
-  for (const svc of LEADER_SVCS) {
+  for (const svc of LEADER_CORE_SVCS) {
     if (!isRunning(svc)) {
       warn(`${svc} không chạy — compose up lại`);
       composeUp(svc);
@@ -594,7 +612,7 @@ async function shutdown(signal) {
     clearTimeout(_sseReconnectTimer);
   }
 
-  composeDown(FOLLOWER_STOP);
+  composeDown(followerStopServices());
 
   await rtdbDelete(`${LOCK_NODE}/${INSTANCE_ID}`).catch(() => {});
   log(`Goodbye — ${INSTANCE_ID}`);
@@ -626,7 +644,7 @@ async function main() {
   }
 
   log("Init: compose down managed services (clean start)...");
-  composeDown(FOLLOWER_STOP);
+  composeDown(followerStopServices());
 
   await registerSelf();
 

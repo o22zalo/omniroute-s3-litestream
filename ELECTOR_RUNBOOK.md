@@ -12,6 +12,7 @@ Tài liệu này mô tả **luồng hoạt động thực tế** của `elector`
   - `litestream`
   - `omniroute`
   - `cloudflared`
+- Trên node follower, tất cả service trong compose (trừ service giữ lại như `elector`) đều phải dừng.
 - Các instance còn lại là **Follower** (đứng chờ), không chạy các service trên.
 
 ### Luồng chi tiết
@@ -22,8 +23,8 @@ Tài liệu này mô tả **luồng hoạt động thực tế** của `elector`
    - Sinh `INSTANCE_ID` nếu chưa có.
 
 2. **Init an toàn (rất quan trọng)**
-   - Ngay lúc start, elector chủ động stop toàn bộ managed services theo thứ tự:
-     - `cloudflared` → `omniroute` → `litestream`
+   - Ngay lúc start, elector đọc danh sách service từ `docker compose config --services`.
+   - Elector sẽ stop toàn bộ service không nằm trong `ELECTOR_KEEP_SERVICES` (mặc định chỉ giữ `elector`).
    - Mục tiêu: không để follower vô tình replicate lên S3.
 
 3. **Election loop**
@@ -39,13 +40,16 @@ Tài liệu này mô tả **luồng hoạt động thực tế** của `elector`
    - Sau đó heartbeat định kỳ để gia hạn lock.
 
 5. **Nếu thua election → Follower**
-   - Giữ toàn bộ managed services ở trạng thái dừng.
+   - Giữ toàn bộ service không bắt buộc ở trạng thái dừng (tự động theo compose, trừ các service trong `ELECTOR_KEEP_SERVICES`).
    - Chỉ theo dõi leader hiện tại và thử giành lock khi lock hết hạn.
 
 6. **Khi Leader mất lock / shutdown**
    - Demote về follower:
-     - stop `cloudflared` → `omniroute` → `litestream`
+     - stop toàn bộ service không thuộc `ELECTOR_KEEP_SERVICES`
    - Release lock (nếu đang giữ lock).
+
+> Có thể tùy chỉnh service được giữ lại bằng biến:
+> `ELECTOR_KEEP_SERVICES=elector,service_khac`
 
 ### Luồng bảo vệ dữ liệu trong `litestream/startup.sh`
 
