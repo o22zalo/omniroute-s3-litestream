@@ -17,6 +17,32 @@ Luồng đúng sau deploy:
 
 ---
 
+
+## 0.1 Chạy nhanh bằng GitHub Actions
+
+Repo đã có workflow `.github/workflows/deploy-litefs.yml` để bạn chỉ cần bấm chạy và kiểm tra.
+
+Secrets tối thiểu cần set:
+
+- `TS_AUTHKEY`
+- `TS_TAILNET`
+- `CONSUL_CANDIDATES`
+- `NEXT_PUBLIC_BASE_URL`
+- `JWT_SECRET`
+- `API_KEY_SECRET`
+- `MACHINE_ID_SALT`
+- `STORAGE_ENCRYPTION_KEY`
+- `INITIAL_PASSWORD`
+
+Cách chạy:
+
+1. Vào **Actions** -> `deploy-litefs`.
+2. Chọn `node_slot` (1/2/3...) để workflow tự đặt hostname Tailscale ổn định.
+3. Chọn `skip_cloudflared=true` cho lần chạy kiểm tra nội bộ trước.
+4. Run workflow và xem bước `Wait for health` + `Smoke test`.
+
+---
+
 ## 1) Preflight
 
 ## 1.1 Chuẩn bị env
