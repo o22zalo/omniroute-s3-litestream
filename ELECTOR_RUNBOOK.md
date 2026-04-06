@@ -91,6 +91,7 @@ Khi `litestream` được Leader start:
   - Prefix cố định trên S3 để dễ theo dõi (vd `storage/prod`).
 - `LITESTREAM_RETENTION` (optional, default `168h`)
   - Tự dọn snapshot/WAL cũ để giảm số object.
+- Hai biến trên cần được inject từ `.env`/compose environment (không dùng cú pháp `${VAR:-default}` trực tiếp trong `litestream.yml`).
 
 > Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
 

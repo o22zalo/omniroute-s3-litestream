@@ -9,7 +9,7 @@ dbs:
         #   LITESTREAM_PATH=storage/prod
         #   LITESTREAM_PATH=storage/staging
         # Bên trong prefix này, Litestream vẫn tự quản lý thư mục generations/*.
-        path: ${LITESTREAM_PATH:-storage}
+        path: ${LITESTREAM_PATH}
         # FIX: thêm https:// — thiếu protocol gây litestream snapshots fail silently
         # → từng dẫn đến startup.sh nghĩ "không có snapshot" → start fresh → generation mới
         endpoint: https://${SUPABASE_PROJECT_REF}.supabase.co/storage/v1/s3
@@ -24,4 +24,4 @@ dbs:
         # sync-interval: 10s
         # Retention: tự dọn dữ liệu cũ để tránh phình generations/snapshots/wal.
         # Có thể override bằng env, ví dụ: LITESTREAM_RETENTION=168h (7 ngày)
-        retention: ${LITESTREAM_RETENTION:-168h}
+        retention: ${LITESTREAM_RETENTION}
