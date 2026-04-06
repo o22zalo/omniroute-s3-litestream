@@ -10,11 +10,21 @@ RUN apt-get update && apt-get install -y \
     tini \
     && rm -rf /var/lib/apt/lists/*
 
-ARG LITEFS_VERSION=0.5.13
-RUN curl -L "https://github.com/superfly/litefs/releases/download/v${LITEFS_VERSION}/litefs-${LITEFS_VERSION}-linux-amd64.tar.gz" \
-    | tar -xz -C /usr/local/bin litefs
-
-RUN chmod 755 /usr/local/bin/litefs
+# Nếu để rỗng thì lấy release mới nhất.
+# Nếu set (ví dụ 0.5.13) thì lấy đúng tag v<version>.
+ARG LITEFS_VERSION=
+RUN set -eux; \
+    if [ -n "${LITEFS_VERSION}" ]; then \
+      RELEASE_API="https://api.github.com/repos/superfly/litefs/releases/tags/v${LITEFS_VERSION}"; \
+    else \
+      RELEASE_API="https://api.github.com/repos/superfly/litefs/releases/latest"; \
+    fi; \
+    ASSET_URL="$(curl -fsSL "${RELEASE_API}" | grep -o 'https://[^\"]*litefs[^\"]*linux-amd64\.tar\.gz' | head -n1)"; \
+    test -n "${ASSET_URL}"; \
+    curl -fsSL "${ASSET_URL}" -o /tmp/litefs.tar.gz; \
+    tar -xzf /tmp/litefs.tar.gz -C /usr/local/bin litefs; \
+    chmod 755 /usr/local/bin/litefs; \
+    rm -f /tmp/litefs.tar.gz
 
 WORKDIR /app
 

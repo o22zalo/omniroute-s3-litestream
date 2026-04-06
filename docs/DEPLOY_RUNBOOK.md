@@ -293,3 +293,27 @@ Soak 2 giờ (ví dụ):
 - [ ] Smoke + soak đạt yêu cầu.
 
 Nếu thiếu bất kỳ mục nào -> coi là rollout **chưa đạt**.
+
+
+## 9) Troubleshooting nhanh
+
+### Lỗi build LiteFS: `gzip: stdin: not in gzip format`
+
+Nguyên nhân thường gặp: URL release LiteFS hardcode bị lỗi/404/403 nên `curl` trả về nội dung text thay vì tar.gz.
+
+Bản Dockerfile hiện tại đã chuyển sang cơ chế:
+
+- query GitHub Releases API (`latest` hoặc `tags/v<version>`)
+- tự lấy asset `linux-amd64.tar.gz`
+- dùng `curl -fsSL` để fail sớm nếu tải lỗi
+
+Nếu cần pin version, build với:
+
+```bash
+docker compose build --build-arg LITEFS_VERSION=0.5.13 omniroute-litefs
+```
+
+Nếu bỏ pin, Dockerfile sẽ lấy release mới nhất.
+
+---
+
