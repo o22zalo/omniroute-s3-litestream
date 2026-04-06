@@ -22,6 +22,7 @@ const os = require("os");
 // ──────────────────────────────────────────────────────────────────────
 const DB_PATH = process.env.DB_PATH || "/app/data/storage.sqlite";
 const CONFIG_PATH = process.env.LITESTREAM_CONFIG || "/etc/litestream.yml";
+const AUTO_RESTORE_FROM_S3 = (process.env.LITESTREAM_AUTO_RESTORE || "false").toLowerCase() === "true";
 
 // ──────────────────────────────────────────────────────────────────────
 // Logging
@@ -221,6 +222,7 @@ function main() {
   log(` Config    : ${CONFIG_PATH}`);
   log(` Bucket    : ${process.env.LITESTREAM_BUCKET || "<not set>"}`);
   log(` Supabase  : ${process.env.SUPABASE_PROJECT_REF || "<not set>"}`);
+  log(` Auto restore from S3 : ${AUTO_RESTORE_FROM_S3 ? "ON" : "OFF"}`);
   log("════════════════════════════════════════");
 
   validateConfig();
@@ -238,6 +240,13 @@ function main() {
 
   if (s3State === "has_snapshot") {
     // Case B: có snapshot → restore bắt buộc thành công
+    if (!AUTO_RESTORE_FROM_S3) {
+      fatal(
+        "S3 có snapshot nhưng auto-restore đang tắt (LITESTREAM_AUTO_RESTORE=false).\n" +
+          "Dừng để tránh restore tự động gây phát sinh generation mới ngoài ý muốn.\n" +
+          "Nếu muốn restore tự động, set LITESTREAM_AUTO_RESTORE=true.",
+      );
+    }
     restoreFromS3();
   } else {
     // Case C: S3 kết nối OK nhưng chưa có data → fresh install

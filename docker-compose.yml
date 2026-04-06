@@ -128,6 +128,7 @@ services:
     environment:
       - LITESTREAM_PATH=${LITESTREAM_PATH:-storage}
       - LITESTREAM_RETENTION=${LITESTREAM_RETENTION:-168h}
+      - LITESTREAM_AUTO_RESTORE=${LITESTREAM_AUTO_RESTORE:-false}
     volumes:
       - ${CUR_WORK_DIR:-.}/data:/app/data
       - ${CUR_WORK_DIR:-.}/litestream/litestream.yml:/etc/litestream.yml:ro

@@ -91,9 +91,13 @@ Khi `litestream` được Leader start:
   - Prefix cố định trên S3 để dễ theo dõi (vd `storage/prod`).
 - `LITESTREAM_RETENTION` (optional, default `168h`)
   - Tự dọn snapshot/WAL cũ để giảm số object.
+- `LITESTREAM_AUTO_RESTORE` (optional, default `false`)
+  - `false`: nếu local DB mất nhưng S3 có snapshot thì **fail fast**, không restore tự động.
+  - `true`: cho phép startup tự restore từ S3.
 - Hai biến trên cần được inject từ `.env`/compose environment (không dùng cú pháp `${VAR:-default}` trực tiếp trong `litestream.yml`).
 
 > Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
+> Cách "triệt để" để tránh phát sinh generation do restore lặp: giữ `LITESTREAM_AUTO_RESTORE=false` và chỉ restore thủ công khi cần.
 
 ### Ứng dụng
 - `OMNIROUTE_PORT` (nếu cần đổi port)
