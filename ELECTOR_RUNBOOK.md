@@ -58,11 +58,12 @@ Tài liệu này mô tả **luồng hoạt động thực tế** của `elector`
 ### Luồng bảo vệ dữ liệu trong `litestream/startup.sh`
 
 Khi `litestream` được Leader start:
-- Nếu local DB đã có: bỏ qua restore.
-- Nếu local DB chưa có:
-  - check snapshot trên S3.
-  - nếu có snapshot thì **bắt buộc restore thành công**.
-  - restore fail => **exit 1** (không cho chạy tiếp với DB rỗng).
+- Luôn probe S3 (`snapshots` + `generations`) trước khi replicate.
+- Nếu S3 đã có dữ liệu thì **bắt buộc restore thành công** (kể cả local DB đã có).
+- Nếu S3 chưa có dữ liệu:
+  - có local DB -> dùng local DB hiện tại và replicate.
+  - không có local DB -> fresh install.
+- restore fail => **exit 1** (không cho chạy tiếp với DB sai state/rỗng).
 
 Điều này ngăn trường hợp ghi đè dữ liệu cũ khi S3 credential/network lỗi.
 

@@ -4,10 +4,10 @@
 /**
  * litestream/startup.js
  *
- * Logic đơn giản, rõ ràng:
- *   A) Local DB đã tồn tại → skip restore, replicate luôn
- *   B) Không có local DB + S3 có snapshot → restore (fail hard nếu lỗi)
- *   C) Không có local DB + S3 không có snapshot → start fresh, replicate luôn
+ * Logic hiện tại:
+ *   A) Luôn probe S3 (snapshots + generations)
+ *   B) Nếu S3 đã có dữ liệu -> restore bắt buộc (kể cả local DB đã tồn tại)
+ *   C) Nếu S3 chưa có dữ liệu -> dùng local DB (nếu có) hoặc start fresh
  *
  * Nếu S3 check bị lỗi (network/credentials) → hard exit, không start với DB rỗng.
  */
@@ -273,23 +273,31 @@ function main() {
 
   validateConfig();
 
-  // Case A: local DB đã có → replicate luôn
-  if (localDbExists()) {
+  const hasLocalDb = localDbExists();
+  if (hasLocalDb) {
     const size = (fs.statSync(DB_PATH).size / 1024).toFixed(1);
-    log(`✅ Local DB đã tồn tại (${size} KB) — bỏ qua restore`);
-    startReplicate();
-    return;
+    log(`✅ Local DB đã tồn tại (${size} KB)`);
+  } else {
+    log("ℹ Local DB chưa tồn tại.");
   }
 
-  // Case B/C: không có local DB
+  // Luôn probe S3 để tránh skip restore nhầm khi local DB tồn tại nhưng stale/rỗng logic.
   const probe = probeS3ReplicaState();
 
   if (probe.hasData) {
-    // Case B: path trên S3 đã có dữ liệu (snapshot/generation) → restore bắt buộc thành công
+    // Nếu S3 đã có dữ liệu, luôn restore để đảm bảo node vào đúng shared state trước khi replicate.
+    // Điều này ngăn trường hợp omniroute chạy trên local DB cũ/chưa đồng bộ.
+    if (hasLocalDb) {
+      log("S3 đã có dữ liệu => sẽ restore đè local DB để đảm bảo nhất quán trước khi start app.");
+    }
     restoreFromS3();
   } else {
-    // Case C: S3 kết nối OK nhưng chưa có data → fresh install
-    log("ℹ Không tìm thấy snapshot trên S3 (fresh install) — bắt đầu với DB mới");
+    // S3 kết nối OK nhưng chưa có data.
+    if (hasLocalDb) {
+      log("ℹ S3 chưa có dữ liệu — dùng local DB hiện có và bắt đầu replicate.");
+    } else {
+      log("ℹ Không tìm thấy snapshot/generation trên S3 (fresh install) — bắt đầu với DB mới");
+    }
   }
 
   startReplicate();
