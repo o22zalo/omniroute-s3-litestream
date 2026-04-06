@@ -53,8 +53,27 @@ function validateConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
     fatal(`Config không tìm thấy: ${CONFIG_PATH}`);
   }
+  const cfgStat = fs.statSync(CONFIG_PATH);
+  if (!cfgStat.isFile()) {
+    fatal(`CONFIG_PATH là thư mục, không phải file: ${CONFIG_PATH}`);
+  }
   // Đảm bảo thư mục chứa DB tồn tại
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+}
+
+function moveFileSafely(src, dest) {
+  try {
+    fs.renameSync(src, dest);
+    return;
+  } catch (e) {
+    // EXDEV: cross-device link (ví dụ /tmp và /app/data khác mount/device)
+    if (e && e.code === "EXDEV") {
+      fs.copyFileSync(src, dest);
+      fs.unlinkSync(src);
+      return;
+    }
+    throw e;
+  }
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -148,7 +167,14 @@ function restoreFromS3() {
   try {
     fs.unlinkSync(DB_PATH);
   } catch {}
-  fs.renameSync(tmpPath, DB_PATH);
+  try {
+    moveFileSafely(tmpPath, DB_PATH);
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {}
+    fatal(`Không thể move DB restore về đích (${tmpPath} -> ${DB_PATH}): ${e.message}`);
+  }
 
   const finalStat = fs.statSync(DB_PATH);
   log(`✅ Restore thành công (${(finalStat.size / 1024).toFixed(1)} KB)`);
