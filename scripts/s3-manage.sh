@@ -43,6 +43,14 @@ check_required_vars() {
   fi
 }
 
+get_s3_prefix() {
+  if [ -n "${LITESTREAM_PATH}" ]; then
+    echo "${LITESTREAM_PATH}"
+  else
+    echo "storage"
+  fi
+}
+
 # ─── Check Docker available ──────────────────────────────────
 check_docker() {
   if ! docker info > /dev/null 2>&1; then
@@ -66,6 +74,7 @@ aws_cli() {
 # ─── Commands ────────────────────────────────────────────────
 
 cmd_info() {
+  S3_PREFIX="$(get_s3_prefix)"
   echo ""
   echo "══════════════════════════════════════════"
   echo "  📋 Cấu Hình Hiện Tại"
@@ -73,7 +82,7 @@ cmd_info() {
   echo "  Bucket        : ${LITESTREAM_BUCKET}"
   echo "  Supabase Ref  : ${SUPABASE_PROJECT_REF}"
   echo "  S3 Endpoint   : https://${SUPABASE_PROJECT_REF}.supabase.co/storage/v1/s3"
-  echo "  S3 Path       : s3://${LITESTREAM_BUCKET}/storage"
+  echo "  S3 Path       : s3://${LITESTREAM_BUCKET}/${S3_PREFIX}"
   echo "  Access Key    : ${LITESTREAM_ACCESS_KEY_ID:0:8}... (truncated)"
   echo "  Secret Key    : ******* (hidden)"
   echo ""
@@ -97,6 +106,7 @@ cmd_info() {
 cmd_check() {
   check_required_vars
   check_docker
+  S3_PREFIX="$(get_s3_prefix)"
 
   echo ""
   echo "Kiem tra ket noi S3 (via Docker aws CLI)..."
@@ -121,8 +131,8 @@ cmd_check() {
   aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/" || echo "   (trong)"
 
   echo ""
-  echo "Thu muc storage/ (Litestream backups):"
-  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/storage/" --recursive 2>/dev/null \
+  echo "Thu muc ${S3_PREFIX}/ (Litestream backups):"
+  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/${S3_PREFIX}/" --recursive 2>/dev/null \
     | head -20 \
     || echo "   (chua co backup nao - chay docker compose up de bat dau replicate)"
   echo ""
@@ -131,16 +141,17 @@ cmd_check() {
 cmd_snapshots() {
   check_required_vars
   check_docker
+  S3_PREFIX="$(get_s3_prefix)"
 
   echo ""
   echo "Snapshots:"
-  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/storage/snapshots/" --recursive 2>/dev/null \
+  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/${S3_PREFIX}/snapshots/" --recursive 2>/dev/null \
     | sort -r \
     || echo "   (chua co snapshot nao)"
 
   echo ""
   echo "WAL Segments (10 gan nhat):"
-  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/storage/wal/" --recursive 2>/dev/null \
+  aws_cli s3 ls "s3://${LITESTREAM_BUCKET}/${S3_PREFIX}/wal/" --recursive 2>/dev/null \
     | sort -r | head -10 \
     || echo "   (chua co WAL nao)"
   echo ""
@@ -149,13 +160,14 @@ cmd_snapshots() {
 cmd_clear() {
   check_required_vars
   check_docker
+  S3_PREFIX="$(get_s3_prefix)"
 
   FORCE=0
   if [ "$1" = "--force" ]; then FORCE=1; fi
 
   echo ""
   echo "CANH BAO: Se XOA TOAN BO backup tren S3!"
-  echo "Path: s3://${LITESTREAM_BUCKET}/storage"
+  echo "Path: s3://${LITESTREAM_BUCKET}/${S3_PREFIX}"
   echo ""
 
   if [ ${FORCE} -eq 0 ]; then
@@ -169,7 +181,7 @@ cmd_clear() {
 
   echo ""
   echo "Dang xoa..."
-  aws_cli s3 rm "s3://${LITESTREAM_BUCKET}/storage/" --recursive
+  aws_cli s3 rm "s3://${LITESTREAM_BUCKET}/${S3_PREFIX}/" --recursive
   echo "Da xoa xong."
   echo ""
   echo "   Local DB (./data/storage.sqlite) van con nguyen."

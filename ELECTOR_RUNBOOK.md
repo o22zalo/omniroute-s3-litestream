@@ -87,6 +87,12 @@ Khi `litestream` được Leader start:
 - `LITESTREAM_ACCESS_KEY_ID`
 - `LITESTREAM_SECRET_ACCESS_KEY`
 - `SUPABASE_PROJECT_REF`
+- `LITESTREAM_PATH` (optional, default `storage`)
+  - Prefix cố định trên S3 để dễ theo dõi (vd `storage/prod`).
+- `LITESTREAM_RETENTION` (optional, default `168h`)
+  - Tự dọn snapshot/WAL cũ để giảm số object.
+
+> Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
 
 ### Ứng dụng
 - `OMNIROUTE_PORT` (nếu cần đổi port)

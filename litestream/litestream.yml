@@ -4,7 +4,12 @@ dbs:
       - type: s3
         name: supabase
         bucket: ${LITESTREAM_BUCKET}
-        path: storage
+        # Prefix cố định trên S3 để dễ theo dõi theo môi trường/app.
+        # Ví dụ:
+        #   LITESTREAM_PATH=storage/prod
+        #   LITESTREAM_PATH=storage/staging
+        # Bên trong prefix này, Litestream vẫn tự quản lý thư mục generations/*.
+        path: ${LITESTREAM_PATH:-storage}
         # FIX: thêm https:// — thiếu protocol gây litestream snapshots fail silently
         # → từng dẫn đến startup.sh nghĩ "không có snapshot" → start fresh → generation mới
         endpoint: https://${SUPABASE_PROJECT_REF}.supabase.co/storage/v1/s3
@@ -17,5 +22,6 @@ dbs:
 
         # Sync interval (default 1s) — tăng để giảm request count nếu cần
         # sync-interval: 10s
-        # Retention: giữ snapshot bao lâu (default: không xóa)
-        # retention: 24h
+        # Retention: tự dọn dữ liệu cũ để tránh phình generations/snapshots/wal.
+        # Có thể override bằng env, ví dụ: LITESTREAM_RETENTION=168h (7 ngày)
+        retention: ${LITESTREAM_RETENTION:-168h}
