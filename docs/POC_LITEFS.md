@@ -49,6 +49,7 @@ Cloudflare Tunnel
 - `scripts/migrate-from-litestream.sh`: migration DB một lần.
 - `scripts/litefs-smoke.sh`: smoke test nhanh.
 - `scripts/litefs-soak.sh`: soak test dài.
+- `scripts/resolve-instance-addr.sh`: resolve `INSTANCE_ADDR` khi dùng Tailscale/IP động.
 
 ---
 
@@ -72,6 +73,20 @@ Ví dụ:
 ```bash
 cp .env.example .env
 ```
+
+
+## 3.1.1 Node IP động (Tailscale/GitHub Actions)
+
+Nếu runner không có IP cố định, **không nên** set `INSTANCE_ADDR` bằng IP runtime.
+Ưu tiên dùng MagicDNS ổn định của Tailscale.
+
+Thiết lập nhanh:
+
+```bash
+export INSTANCE_ADDR=$(./scripts/resolve-instance-addr.sh)
+```
+
+Xem hướng dẫn chi tiết tại `docs/TAISCALE_LITEFS.md`.
 
 ## 3.2 Boot node đầu tiên (single-node)
 
