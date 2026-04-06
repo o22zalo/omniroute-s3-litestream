@@ -50,6 +50,7 @@ Cloudflare Tunnel
 - `scripts/litefs-smoke.sh`: smoke test nhanh.
 - `scripts/litefs-soak.sh`: soak test dài.
 - `scripts/resolve-instance-addr.sh`: resolve `INSTANCE_ADDR` khi dùng Tailscale/IP động.
+- `scripts/resolve-consul-addr.sh`: tự chọn `CONSUL_HTTP_ADDR` từ danh sách endpoint Consul động.
 
 ---
 
@@ -84,6 +85,7 @@ Thiết lập nhanh:
 
 ```bash
 export INSTANCE_ADDR=$(./scripts/resolve-instance-addr.sh)
+export CONSUL_HTTP_ADDR=$(./scripts/resolve-consul-addr.sh)
 ```
 
 Xem hướng dẫn chi tiết tại `docs/TAISCALE_LITEFS.md`.

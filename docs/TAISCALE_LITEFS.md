@@ -99,3 +99,25 @@ LiteFS đọc `INSTANCE_ADDR` qua env và đưa vào `lease.advertise-url`.
 2. Không dùng hostname theo `run_id` nếu muốn cluster identity ổn định.
 3. Nếu buộc phải ephemeral hostname, luôn resolve `INSTANCE_ADDR` mỗi run và đẩy vào env trước khi compose.
 4. Theo dõi Consul key `litefs/omniroute/primary` khi deploy để đảm bảo không split-brain.
+
+---
+
+## Consul không có IP cố định: tự xoay vòng được không?
+
+**Có.** Dùng nhiều endpoint trong `CONSUL_CANDIDATES` và resolve endpoint còn sống trước khi chạy compose.
+
+Ví dụ:
+
+```bash
+export CONSUL_CANDIDATES="consul-a.tailnet.ts.net,consul-b.tailnet.ts.net,consul-c.tailnet.ts.net"
+export CONSUL_HTTP_ADDR=$(./scripts/resolve-consul-addr.sh)
+```
+
+Script `scripts/resolve-consul-addr.sh` sẽ:
+
+1. Thử `CONSUL_HTTP_ADDR` (nếu có).
+2. Nếu fail thì duyệt từng endpoint trong `CONSUL_CANDIDATES`.
+3. Endpoint nào trả về leader hợp lệ từ `/v1/status/leader` sẽ được chọn.
+
+Điều này phù hợp môi trường GitHub Actions/Tailscale khi node đổi IP liên tục nhưng vẫn có DNS reachability.
+
