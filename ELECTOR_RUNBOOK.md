@@ -94,6 +94,7 @@ Khi `litestream` được Leader start:
 - Hai biến trên cần được inject từ `.env`/compose environment (không dùng cú pháp `${VAR:-default}` trực tiếp trong `litestream.yml`).
 
 > Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
+> Startup sẽ log chi tiết số lượng `snapshots` và `generations` theo path để debug nguyên nhân restore.
 
 ### Ứng dụng
 - `OMNIROUTE_PORT` (nếu cần đổi port)

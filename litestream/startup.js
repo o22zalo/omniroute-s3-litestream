@@ -61,6 +61,13 @@ function validateConfig() {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 }
 
+function nonEmptyLines(s) {
+  return (s || "")
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+}
+
 function moveFileSafely(src, dest) {
   try {
     fs.renameSync(src, dest);
@@ -89,24 +96,24 @@ function localDbExists() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Case B/C: kiểm tra S3 có snapshot không
-// Trả về: "has_snapshot" | "no_snapshot" | "error"
+// Case B/C: kiểm tra S3 có dữ liệu không
+// Tiêu chí:
+//   1) snapshots có dòng output
+//   2) HOẶC generations có dòng output (theo path trên replica)
+// Trả về object để log/debug chi tiết.
 // ──────────────────────────────────────────────────────────────────────
-function checkS3Snapshots() {
+function probeS3ReplicaState() {
   log("Không có local DB — kiểm tra S3 snapshot...");
 
-  const r = run("litestream", ["snapshots", "-config", CONFIG_PATH, DB_PATH]);
-
-  if (r.stderr) {
-    // In ra stderr để debug, nhưng không fail ngay
-    r.stderr.split("\n").forEach((line) => warn(" ", line));
+  const snap = run("litestream", ["snapshots", "-config", CONFIG_PATH, DB_PATH]);
+  if (snap.stderr) {
+    snap.stderr.split("\n").forEach((line) => warn("[snapshots]", line));
   }
 
-  if (!r.ok) {
-    // Lỗi thật (network, credentials, endpoint sai…)
+  if (!snap.ok) {
     log("════════════════════════════════════════");
     fatal(
-      `litestream snapshots thất bại (exit ${r.exitCode})\n` +
+      `litestream snapshots thất bại (exit ${snap.exitCode})\n` +
         `Không thể xác định trạng thái S3 — từ chối start với DB rỗng.\n` +
         `Nguyên nhân thường gặp:\n` +
         `  1. SUPABASE_PROJECT_REF sai hoặc chưa set\n` +
@@ -117,8 +124,37 @@ function checkS3Snapshots() {
     );
   }
 
-  const hasData = r.stdout.split("\n").some((l) => l.trim().length > 0);
-  return hasData ? "has_snapshot" : "no_snapshot";
+  const snapshots = nonEmptyLines(snap.stdout);
+  const hasSnapshot = snapshots.length > 0;
+
+  // Kiểm tra thêm theo path/generation để debug rõ hơn.
+  // Nếu command không support trong bản litestream hiện tại thì chỉ cảnh báo.
+  const gen = run("litestream", ["generations", "-config", CONFIG_PATH, DB_PATH], { timeout: 120_000 });
+  if (!gen.ok && gen.stderr) {
+    warn(`[generations] exit ${gen.exitCode}: ${gen.stderr}`);
+  }
+  const generations = nonEmptyLines(gen.stdout);
+  const hasGeneration = gen.ok && generations.length > 0;
+
+  log(
+    `S3 probe result: snapshots=${snapshots.length}, generations=${generations.length}, ` +
+      `bucket=${process.env.LITESTREAM_BUCKET || "?"}, path=${process.env.LITESTREAM_PATH || "storage"}`,
+  );
+
+  if (snapshots.length) {
+    log(`Snapshot mới nhất: ${snapshots[0]}`);
+  }
+  if (generations.length) {
+    log(`Generation mới nhất: ${generations[0]}`);
+  }
+
+  return {
+    hasData: hasSnapshot || hasGeneration,
+    hasSnapshot,
+    hasGeneration,
+    snapshots,
+    generations,
+  };
 }
 
 // ──────────────────────────────────────────────────────────────────────
@@ -221,6 +257,7 @@ function main() {
   log(` Config    : ${CONFIG_PATH}`);
   log(` Bucket    : ${process.env.LITESTREAM_BUCKET || "<not set>"}`);
   log(` Supabase  : ${process.env.SUPABASE_PROJECT_REF || "<not set>"}`);
+  log(` S3 path   : ${process.env.LITESTREAM_PATH || "storage"}`);
   log("════════════════════════════════════════");
 
   validateConfig();
@@ -234,10 +271,10 @@ function main() {
   }
 
   // Case B/C: không có local DB
-  const s3State = checkS3Snapshots();
+  const probe = probeS3ReplicaState();
 
-  if (s3State === "has_snapshot") {
-    // Case B: có snapshot → restore bắt buộc thành công
+  if (probe.hasData) {
+    // Case B: path trên S3 đã có dữ liệu (snapshot/generation) → restore bắt buộc thành công
     restoreFromS3();
   } else {
     // Case C: S3 kết nối OK nhưng chưa có data → fresh install
