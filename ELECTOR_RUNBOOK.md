@@ -58,11 +58,12 @@ Tài liệu này mô tả **luồng hoạt động thực tế** của `elector`
 ### Luồng bảo vệ dữ liệu trong `litestream/startup.sh`
 
 Khi `litestream` được Leader start:
-- Nếu local DB đã có: bỏ qua restore.
-- Nếu local DB chưa có:
-  - check snapshot trên S3.
-  - nếu có snapshot thì **bắt buộc restore thành công**.
-  - restore fail => **exit 1** (không cho chạy tiếp với DB rỗng).
+- Luôn probe S3 (`snapshots` + `generations`) trước khi replicate.
+- Nếu S3 đã có dữ liệu thì **bắt buộc restore thành công** (kể cả local DB đã có).
+- Nếu S3 chưa có dữ liệu:
+  - có local DB -> dùng local DB hiện tại và replicate.
+  - không có local DB -> fresh install.
+- restore fail => **exit 1** (không cho chạy tiếp với DB sai state/rỗng).
 
 Điều này ngăn trường hợp ghi đè dữ liệu cũ khi S3 credential/network lỗi.
 
@@ -95,6 +96,7 @@ Khi `litestream` được Leader start:
 
 > Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
 > Startup sẽ log chi tiết số lượng `snapshots` và `generations` theo path để debug nguyên nhân restore.
+> Nếu parse được generation id, log sẽ in thêm dạng breadcrumb: `<LITESTREAM_PATH> => generations => <generation_id>`.
 
 ### Ứng dụng
 - `OMNIROUTE_PORT` (nếu cần đổi port)
