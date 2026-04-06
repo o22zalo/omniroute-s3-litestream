@@ -5,6 +5,7 @@ const https = require("https");
 const http = require("http");
 const { spawnSync } = require("child_process");
 const crypto = require("crypto");
+const os = require("os");
 
 // ──────────────────────────────────────────────────────────────────────
 // 1. Config
@@ -136,9 +137,44 @@ function dockerExec(args, { silent = false, timeout = 90000 } = {}) {
   return { ok: r.status === 0, stdout: (r.stdout || "").trim() };
 }
 
+function detectHostWorkspaceDir() {
+  if ((process.env.CUR_WORK_DIR || "").trim()) {
+    return process.env.CUR_WORK_DIR.trim();
+  }
+
+  // Trong container elector, hostname thường là container id.
+  // Inspect mount /workspace để lấy source path thực trên host.
+  const selfId = os.hostname();
+  const inspect = dockerExec(
+    [
+      "inspect",
+      "-f",
+      "{{range .Mounts}}{{if eq .Destination \"/workspace\"}}{{.Source}}{{end}}{{end}}",
+      selfId,
+    ],
+    { silent: true, timeout: 15000 },
+  );
+
+  if (inspect.ok && inspect.stdout) {
+    return inspect.stdout;
+  }
+
+  return null;
+}
+
+const HOST_WORKSPACE_DIR = detectHostWorkspaceDir();
+
 // ── Docker Compose helpers ────────────────────────────────────────────
 function composeExec(args, opts = {}) {
-  return dockerExec(["compose", "-f", COMPOSE_FILE, "--env-file", ENV_FILE, "-p", COMPOSE_PROJECT, ...args], opts);
+  const env = { ...process.env };
+  if (HOST_WORKSPACE_DIR) env.CUR_WORK_DIR = HOST_WORKSPACE_DIR;
+  const r = spawnSync("docker", ["compose", "-f", COMPOSE_FILE, "--env-file", ENV_FILE, "-p", COMPOSE_PROJECT, ...args], {
+    encoding: "utf8",
+    timeout: opts.timeout || 90000,
+    env,
+  });
+  if (!opts.silent && r.stderr && r.status !== 0) process.stderr.write(r.stderr);
+  return { ok: r.status === 0, stdout: (r.stdout || "").trim() };
 }
 
 function composeStopRemove(service, graceSec = 10) {
@@ -582,6 +618,7 @@ async function main() {
   log(`║ RTDB node     : ${LOCK_NODE}`);
   log(`║ registered_at : ${REGISTERED_AT}`);
   log(`║ Compose file  : ${COMPOSE_FILE}`);
+  log(`║ Host workdir  : ${HOST_WORKSPACE_DIR || "(không detect được)"}`);
   log("╚══════════════════════════════════════════════════╝");
 
   if (COMPOSE_PROJECT === "omniroute-s3-litestream") {
