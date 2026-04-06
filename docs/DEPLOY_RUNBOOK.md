@@ -43,6 +43,36 @@ Cách chạy:
 
 ---
 
+
+## 0.2 Triển khai KHÔNG dùng cloudflared cần cấu hình gì?
+
+Nếu bạn muốn chạy nội bộ/VPN trước, có thể **không bật cloudflared**.
+
+Cần cấu hình:
+
+1. `.env` đầy đủ secrets app + identity (`INSTANCE_NAME`, `INSTANCE_ADDR`).
+2. `CONSUL_HTTP_ADDR` (hoặc `CONSUL_CANDIDATES` + resolver).
+3. Mở cổng truy cập nội bộ tới LiteFS proxy (`20128`) trên host chạy app.
+4. Dùng URL nội bộ để test, ví dụ:
+   - `http://<node-or-lb-internal>:20128/api/storage/health`
+   - `http://<node-or-lb-internal>:20128/v1/models`
+
+Lệnh chạy tối thiểu (không cloudflared):
+
+```bash
+docker compose up -d consul
+docker compose up -d --build omniroute-litefs
+```
+
+Với GitHub Actions workflow `deploy-litefs`, đặt `skip_cloudflared=true`.
+
+Khi nào mới cần cloudflared?
+
+- Chỉ khi bạn muốn publish public domain qua Cloudflare Tunnel.
+- Nếu chỉ kiểm thử nội bộ hoặc chạy private qua Tailscale/LB nội bộ thì chưa cần bật.
+
+---
+
 ## 1) Preflight
 
 ## 1.1 Chuẩn bị env

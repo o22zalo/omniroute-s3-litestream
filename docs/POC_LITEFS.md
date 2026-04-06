@@ -212,3 +212,8 @@ Output:
 - Có split-brain.
 - FUSE không ổn định trên môi trường deploy.
 - Traffic public không phục hồi sau failover.
+
+
+## 7) Triển khai private trước (không cloudflared)
+
+Bạn có thể chạy `consul` + `omniroute-litefs` trước để kiểm thử nội bộ và chỉ bật `cloudflared` sau khi pass health/smoke/soak.
