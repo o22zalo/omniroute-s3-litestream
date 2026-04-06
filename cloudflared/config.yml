@@ -7,5 +7,5 @@ ingress:
   - hostname: files.dhomniroute.dpdns.org
     service: http://filebrowser:80
   - hostname: dhomniroute.dpdns.org
-    service: http://host.docker.internal:20128
+    service: http://omniroute-litefs:20128
   - service: http_status:404

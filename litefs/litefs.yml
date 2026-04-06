@@ -1,0 +1,39 @@
+fuse:
+  dir: "/litefs"
+  allow-other: false
+  debug: false
+
+data:
+  dir: "/var/lib/litefs"
+  retention: "10m"
+  retention-monitor-interval: "1m"
+
+http:
+  addr: ":20202"
+
+proxy:
+  addr: ":20128"
+  target: "localhost:20129"
+  db: "storage.sqlite"
+  debug: false
+  passthrough:
+    - "/_next/*"
+    - "/favicon.ico"
+    - "/api/storage/health"
+    - "/healthz"
+
+lease:
+  type: "consul"
+  advertise-url: "http://${INSTANCE_ADDR}:20202"
+  hostname: "${INSTANCE_NAME}"
+  candidate: true
+
+  consul:
+    url: "${CONSUL_HTTP_ADDR}"
+    key: "litefs/omniroute/primary"
+    ttl: "10s"
+    lock-delay: "1s"
+
+exec: "node run-standalone.mjs"
+skip-sync: false
+exit-on-error: false
