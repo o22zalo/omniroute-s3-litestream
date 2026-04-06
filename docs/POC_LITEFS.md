@@ -56,6 +56,8 @@ Cloudflare Tunnel
 
 ## 3) Hướng dẫn triển khai chi tiết
 
+> Runbook thao tác từng bước (có PASS/FAIL theo từng stage): `docs/DEPLOY_RUNBOOK.md`.
+
 ## 3.1 Chuẩn bị
 
 1. Tạo `.env` từ `.env.example`.
