@@ -71,8 +71,8 @@ services:
     container_name: cloudflared
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
-      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
-      - ./cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
+      - ${CUR_WORK_DIR:-.}/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ${CUR_WORK_DIR:-.}/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
     restart: "no" # ← elector controls this
     extra_hosts:
       - "host.docker.internal:host-gateway"
@@ -126,8 +126,8 @@ services:
     restart: "no" # ← elector controls this
     env_file: .env
     volumes:
-      - ./data:/app/data
-      - ./litestream/litestream.yml:/etc/litestream.yml:ro
+      - ${CUR_WORK_DIR:-.}/data:/app/data
+      - ${CUR_WORK_DIR:-.}/litestream/litestream.yml:/etc/litestream.yml:ro
       # startup.js đã được COPY vào image — không cần mount nữa
       # (litestream.yml vẫn mount để dễ chỉnh config mà không build lại)
     # entrypoint không cần khai báo — đã set trong Dockerfile

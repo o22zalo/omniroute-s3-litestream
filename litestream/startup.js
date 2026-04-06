@@ -160,6 +160,18 @@ function restoreFromS3() {
 function startReplicate() {
   log("Khởi động Litestream replication...");
 
+  // Kiểm tra CONFIG_PATH trước khi spawn
+  const stat = fs.statSync(CONFIG_PATH, { throwIfNoEntry: false });
+  if (!stat) {
+    log(`❌ ERROR: CONFIG_PATH không tồn tại: ${CONFIG_PATH}`);
+    process.exit(1);
+  } else if (stat.isDirectory()) {
+    log(`❌ ERROR: CONFIG_PATH là thư mục, không phải file: ${CONFIG_PATH}`);
+    process.exit(1);
+  } else {
+    log(`✅ CONFIG_PATH ok: ${CONFIG_PATH} (${stat.size} bytes)`);
+  }
+
   // Dùng spawn thay vì spawnSync để không block + forward signals đúng
   const child = spawn("litestream", ["replicate", "-config", CONFIG_PATH], {
     stdio: "inherit",
