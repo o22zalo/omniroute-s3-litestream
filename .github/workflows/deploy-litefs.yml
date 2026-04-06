@@ -1,0 +1,127 @@
+name: deploy-litefs
+
+on:
+  workflow_dispatch:
+    inputs:
+      node_slot:
+        description: "Node slot cố định cho hostname tailscale (vd: 1,2,3)"
+        required: true
+        default: "1"
+      skip_cloudflared:
+        description: "Bỏ qua bật cloudflared"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      TS_NODE_NAME: omniroute-node-${{ github.event.inputs.node_slot }}
+      TAILSCALE_TAILNET: ${{ secrets.TS_TAILNET }}
+      CONSUL_CANDIDATES: ${{ secrets.CONSUL_CANDIDATES }}
+      NEXT_PUBLIC_BASE_URL: ${{ secrets.NEXT_PUBLIC_BASE_URL }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      API_KEY_SECRET: ${{ secrets.API_KEY_SECRET }}
+      MACHINE_ID_SALT: ${{ secrets.MACHINE_ID_SALT }}
+      STORAGE_ENCRYPTION_KEY: ${{ secrets.STORAGE_ENCRYPTION_KEY }}
+      INITIAL_PASSWORD: ${{ secrets.INITIAL_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Tailscale
+        run: |
+          curl -fsSL https://tailscale.com/install.sh | sh
+
+      - name: Connect Tailscale (stable hostname by slot)
+        env:
+          TS_AUTHKEY: ${{ secrets.TS_AUTHKEY }}
+        run: |
+          if [ -z "${TS_AUTHKEY}" ]; then
+            echo "TS_AUTHKEY secret is required"
+            exit 1
+          fi
+
+          sudo tailscale up \
+            --authkey="${TS_AUTHKEY}" \
+            --hostname="${TS_NODE_NAME}" \
+            --accept-dns=true \
+            --reset
+
+          tailscale status
+
+      - name: Resolve INSTANCE_ADDR and CONSUL_HTTP_ADDR
+        run: |
+          export INSTANCE_ADDR=$(./scripts/resolve-instance-addr.sh)
+          export CONSUL_HTTP_ADDR=$(./scripts/resolve-consul-addr.sh)
+
+          echo "INSTANCE_ADDR=${INSTANCE_ADDR}" >> "$GITHUB_ENV"
+          echo "CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}" >> "$GITHUB_ENV"
+
+          echo "Resolved INSTANCE_ADDR=${INSTANCE_ADDR}"
+          echo "Resolved CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}"
+
+      - name: Create .env for compose
+        run: |
+          cp .env.example .env
+
+          cat >> .env <<EOF
+          NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+          INSTANCE_NAME=${TS_NODE_NAME}
+          INSTANCE_ADDR=${INSTANCE_ADDR}
+          CONSUL_HTTP_ADDR=${CONSUL_HTTP_ADDR}
+          CONSUL_CANDIDATES=${CONSUL_CANDIDATES}
+          JWT_SECRET=${JWT_SECRET}
+          API_KEY_SECRET=${API_KEY_SECRET}
+          MACHINE_ID_SALT=${MACHINE_ID_SALT}
+          STORAGE_ENCRYPTION_KEY=${STORAGE_ENCRYPTION_KEY}
+          INITIAL_PASSWORD=${INITIAL_PASSWORD}
+          EOF
+
+      - name: Boot consul + app
+        run: |
+          docker compose up -d consul
+          docker compose up -d --build omniroute-litefs
+
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 24); do
+            if curl -fsS http://localhost:20128/api/storage/health >/dev/null; then
+              echo "health OK"
+              exit 0
+            fi
+            echo "waiting health... (${i}/24)"
+            sleep 5
+          done
+          echo "health check timeout"
+          docker compose ps
+          docker compose logs omniroute-litefs --tail 200
+          exit 1
+
+      - name: Smoke test
+        run: |
+          ./scripts/litefs-smoke.sh http://localhost:20128
+
+      - name: Enable cloudflared
+        if: ${{ github.event.inputs.skip_cloudflared == 'false' }}
+        run: |
+          docker compose up -d cloudflared
+
+      - name: Summary
+        run: |
+          docker compose ps
+          echo "deploy-litefs completed"
+
+      - name: Debug logs on failure
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs consul --tail 200 || true
+          docker compose logs omniroute-litefs --tail 200 || true
+          docker compose logs cloudflared --tail 200 || true

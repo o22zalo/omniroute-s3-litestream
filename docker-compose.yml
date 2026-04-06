@@ -1,179 +1,71 @@
-##############################################################
-# docker-compose.yml — Multi-Instance với Leader Election
-#
-# Architecture:
-#   elector     — luôn chạy, điều phối qua RTDB distributed lock
-#   litestream  — chỉ chạy trên LEADER (elector kiểm soát)
-#   omniroute   — chỉ chạy trên LEADER (elector kiểm soát)
-#   cloudflared — chỉ chạy trên LEADER (elector kiểm soát)
-#
-# Follower: tất cả managed services STOPPED + REMOVED
-#   → Cloudflare Tunnel tự động skip instance không healthy
-#   → Zero-downtime failover khi leader chết
-#
-# QUAN TRỌNG: restart: "no" cho managed services
-#   → Elector là người duy nhất quyết định start/stop
-#   → Tránh race condition với Docker restart policy
-##############################################################
 version: "3.9"
+
 services:
-  # ================================================================
-  #  ELECTOR — Leader election daemon
-  #  Luôn chạy, không phụ thuộc service nào
-  # ================================================================
-  elector:
+  consul:
+    image: hashicorp/consul:1.19
+    container_name: consul
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0
+    ports:
+      - "8500:8500"
+    restart: unless-stopped
+
+  omniroute-litefs:
     build:
-      context: ./services/elector
-      dockerfile: Dockerfile
-    container_name: elector
-    restart: unless-stopped # elector TỰ restart nếu crash
-    volumes:
-      # Docker socket: để elector control các container khác
-      - /var/run/docker.sock:/var/run/docker.sock
-      # Host workspace: để elector chạy `docker compose` với đúng compose file
-      # CUR_WORK_DIR được set bởi detect-os.sh và ghi vào .env
-      - ${CUR_WORK_DIR:-.}:/workspace:ro
+      context: .
+      dockerfile: litefs/Dockerfile
+    container_name: omniroute-litefs
+    depends_on:
+      - consul
+    cap_add:
+      - SYS_ADMIN
+    devices:
+      - /dev/fuse:/dev/fuse
+    security_opt:
+      - apparmor:unconfined
     env_file: .env
     environment:
-      # COMPOSE_PROJECT_NAME phải khớp với project name để tìm đúng container
-      - COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME:-omniroute-s3-litestream}
-      # RTDB key cho distributed lock — unique per deployment target
-      - LEADER_LOCK_KEY=leader-lock-${COMPOSE_PROJECT_NAME:-omniroute-s3-litestream}
-      # Thời gian lock tồn tại (giây) — failover time = TTL + restore time
-      - LEADER_LOCK_TTL=30
-      # Heartbeat interval (giây) — phải < TTL/2 để tránh flapping
-      - HEARTBEAT_INTERVAL=10
-      # Instance ID — inject từ CI để dễ debug
-      # GitHub Actions: GITHUB_RUN_ID-GITHUB_RUN_ATTEMPT-RUNNER_NAME
-      - INSTANCE_ID=${INSTANCE_ID:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      DATA_DIR: /litefs
+      PORT: 20129
+      INSTANCE_NAME: ${INSTANCE_NAME}
+      INSTANCE_ADDR: ${INSTANCE_ADDR}
+      CONSUL_HTTP_ADDR: ${CONSUL_HTTP_ADDR:-http://consul:8500}
+      NEXT_PUBLIC_BASE_URL: ${NEXT_PUBLIC_BASE_URL}
+    volumes:
+      - ./data-litefs:/var/lib/litefs
+    ports:
+      - "20128:20128"
+      - "20202:20202"
+      - "20129:20129"
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
 
-  # ================================================================
-  #  CLOUDFLARE TUNNEL — Managed by elector
-  #
-  #  restart: "no" → Docker KHÔNG tự restart
-  #  Chỉ elector mới được start/stop container này
-  #
-  #  Khi container STOPPED:
-  #    cloudflared không kết nối với Cloudflare
-  #    → Cloudflare tự route traffic sang instance có cloudflared running
-  #    → Đây là cơ chế failover tự động
-  # ================================================================
-  # docker-compose.yml — cloudflared service
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
     command: tunnel --config /etc/cloudflared/config.yml run
     volumes:
-      - ${CUR_WORK_DIR:-.}/cloudflared/config.yml:/etc/cloudflared/config.yml:ro
-      - ${CUR_WORK_DIR:-.}/cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
-    restart: "no" # ← elector controls this
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ================================================================
-  #  OMNIROUTE — Managed by elector
-  #  Chỉ start sau khi litestream đã healthy + DB verified (restore xong)
-  # ================================================================
-  omniroute:
-    image: diegosouzapw/omniroute:latest
-    container_name: omniroute
-    restart: "no" # ← elector controls this
-    stop_grace_period: 40s
+      - ./cloudflared/config.yml:/etc/cloudflared/config.yml:ro
+      - ./cloudflared-credentials.json:/etc/cloudflared/credentials.json:ro
     depends_on:
-      litestream:
-        condition: service_healthy # ← chờ litestream healthy rồi mới start
-    env_file: .env
-    environment:
-      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL:-http://localhost:20128}
-      - DATA_DIR=/app/data
-      - OMNIROUTE_DISABLE_AUTO_BACKUP=true
-    ports:
-      - "${OMNIROUTE_PORT:-20128}:${OMNIROUTE_PORT:-20128}"
-    volumes:
-      - ${CUR_WORK_DIR:-.}/data:/app/data
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - omniroute-litefs
+    restart: unless-stopped
 
-  # ================================================================
-  #  LITESTREAM — Managed by elector
-  #
-  #  CRITICAL: Chỉ 1 instance litestream được replicate tại 1 lúc
-  #  → elector đảm bảo điều này qua leader election
-  #
-  #  startup.js logic:
-  #    A) Local DB đã tồn tại → skip restore, replicate luôn
-  #    B) S3 có snapshot → restore (fail hard nếu lỗi)
-  #    C) S3 không có snapshot → start fresh, replicate luôn
-  #    Nếu S3 check lỗi → hard exit, không bao giờ start với DB rỗng
-  # ================================================================
-  litestream:
-    build:
-      context: ./litestream # ← đổi từ image: sang build:
-      dockerfile: Dockerfile
-    container_name: litestream
-    restart: "no" # ← elector controls this
-    env_file: .env
-    environment:
-      - LITESTREAM_PATH=${LITESTREAM_PATH:-storage}
-      - LITESTREAM_RETENTION=${LITESTREAM_RETENTION:-168h}
-    volumes:
-      - ${CUR_WORK_DIR:-.}/data:/app/data
-      - ${CUR_WORK_DIR:-.}/litestream/litestream.yml:/etc/litestream.yml:ro
-      # startup.js đã được COPY vào image — không cần mount nữa
-      # (litestream.yml vẫn mount để dễ chỉnh config mà không build lại)
-    # entrypoint không cần khai báo — đã set trong Dockerfile
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - "litestream databases -config /etc/litestream.yml 2>/dev/null | grep -q storage.sqlite"
-      interval: 10s
-      timeout: 10s
-      retries: 12
-      start_period: 120s
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # ================================================================
-  #  DOZZLE — Xem log realtime của tất cả container
-  # ================================================================
   dozzle:
     image: amir20/dozzle:latest
     container_name: dozzle
     restart: unless-stopped
     volumes:
-      - ${DOCKER_SOCK:-/var/run/docker.sock}:/var/run/docker.sock:ro
-  # ================================================================
-  #  FILEBROWSER — Duyệt và tải file log qua web
-  # ================================================================
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
   filebrowser:
     image: filebrowser/filebrowser:latest
     container_name: filebrowser
     command: --noauth --port 80 --root /srv --database /database/filebrowser.db
     volumes:
       - .:/srv
-      # - filebrowser_data:/database
-    # labels:
-    #   - "caddy=http://${SUBDOMAIN_FILEBROWSER:-files-my-docker-app}.${DOMAIN}"
-    #   - "caddy.reverse_proxy={{upstreams 80}}"
-    # - "caddy.basic_auth=/*"
-    # - "caddy.basic_auth.${CADDY_AUTH_USER}=${CADDY_AUTH_HASH}"
-    # networks: [app_net]
-    # restart: unless-stopped
+    restart: unless-stopped
