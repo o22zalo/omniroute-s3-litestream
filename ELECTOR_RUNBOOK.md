@@ -95,6 +95,7 @@ Khi `litestream` được Leader start:
 
 > Lưu ý: thư mục `generations/*` là cơ chế nội bộ của Litestream, không tắt hoàn toàn được.
 > Startup sẽ log chi tiết số lượng `snapshots` và `generations` theo path để debug nguyên nhân restore.
+> Nếu parse được generation id, log sẽ in thêm dạng breadcrumb: `<LITESTREAM_PATH> => generations => <generation_id>`.
 
 ### Ứng dụng
 - `OMNIROUTE_PORT` (nếu cần đổi port)

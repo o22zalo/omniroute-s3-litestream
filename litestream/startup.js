@@ -68,6 +68,12 @@ function nonEmptyLines(s) {
     .filter((l) => l.length > 0);
 }
 
+function extractGenerationId(line) {
+  if (!line) return null;
+  const m = line.match(/\b([a-f0-9]{16})\b/i);
+  return m ? m[1] : null;
+}
+
 function moveFileSafely(src, dest) {
   try {
     fs.renameSync(src, dest);
@@ -146,6 +152,11 @@ function probeS3ReplicaState() {
   }
   if (generations.length) {
     log(`Generation mới nhất: ${generations[0]}`);
+    const genId = extractGenerationId(generations[0]);
+    if (genId) {
+      const prefix = process.env.LITESTREAM_PATH || "storage";
+      log(`S3 breadcrumb: ${prefix} => generations => ${genId}`);
+    }
   }
 
   return {
